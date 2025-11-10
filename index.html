@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>자동 식단표 (월~금)</title>
+<style>
+  body{font-family:'Noto Sans KR',system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Pretendard,sans-serif;background:linear-gradient(135deg,#dff9fb,#c8e6c9);margin:0;padding:10px;color:#1e293b}
+  h1{margin:10px 0 16px;text-align:center;color:#0d47a1}
+  .toolbar{text-align:center;margin-bottom:10px}
+  button{background:#1976d2;color:#fff;border:0;border-radius:8px;padding:8px 12px;margin:0 4px;font-size:14px;cursor:pointer}
+  button:hover{background:#0d47a1}
+  .wrap{max-width:100%;overflow-x:auto;background:#ffffffd9;border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.15)}
+  table{width:100%;border-collapse:collapse;font-size:clamp(12px,2.8vw,16px)}
+  th,td{border:1px solid #cbd5e1;padding:6px;vertical-align:top}
+  thead th{background:linear-gradient(90deg,#4fc3f7,#81c784);color:#fff}
+  tbody th{background:#f1f5f9;color:#0f172a;text-align:center;white-space:nowrap}
+  .head-date{display:flex;flex-direction:column;align-items:center;gap:2px}
+  .head-date span{opacity:.9;font-size:.9em}
+  td{text-align:left}
+  .chip{display:block;background:#f8fafc;border:1px dashed #94a3b8;border-radius:999px;padding:2px 6px;margin:2px 0;width:fit-content;font-size:clamp(10px,2.5vw,14px)}
+  .holiday{background:#fdecea;color:#c62828}
+  .closed{background:#fff9c4;color:#795548}
+  #info{font-size:13px;color:#546e7a;text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>🍱 자동 식단표 (월~금)</h1>
+<div class="toolbar">
+  <button id="prevWeek">◀ 지난주</button>
+  <button id="thisWeek">이번주</button>
+  <button id="nextWeek">다음주 ▶</button>
+</div>
+
+<div class="wrap">
+<table id="menuTable">
+  <thead id="thead"><tr>
+    <th>구분</th><th>월</th><th>화</th><th>수</th><th>목</th><th>금</th>
+  </tr></thead>
+  <tbody>
+    <tr><th>아침</th></tr>
+    <tr><th>점심</th></tr>
+    <tr><th>저녁</th></tr>
+  </tbody>
+</table>
+</div>
+<div id="info"></div>
+
+<script>
+// ===== 설정 =====
+const HOLIDAYS = ['2025-01-01','2025-03-01','2025-05-05','2025-06-06','2025-08-15','2025-10-03','2025-10-09','2025-12-25'];
+const DATA_URL = 'menu.json'; // 같은 리포의 menu.json
+
+// ===== 유틸 =====
+const fmt = d => d.toISOString().slice(0,10);
+const addDays = (d,n)=>{const c=new Date(d); c.setDate(c.getDate()+n); return c;};
+function mondayOf(d){const day=d.getDay();const diff=d.getDate()-day+(day===0?-6:1);return new Date(d.setDate(diff));}
+function isHoliday(d){return HOLIDAYS.includes(fmt(d));}
+
+// ===== 렌더 =====
+let MENU = {}; // { 'YYYY-MM-DD': {아침:[...], 점심:[...], 저녁:[...] } }
+
+function buildHead(base){
+  const w = ['월','화','수','목','금'];
+  let html = '<tr><th>구분</th>';
+  for(let i=0;i<5;i++){
+    const d = addDays(base,i), tag = fmt(d).slice(5).replace('-','.');
+    html += `<th><div class="head-date">${tag}<span>(${w[i]})</span></div></th>`;
+  }
+  html += '</tr>';
+  document.getElementById('thead').innerHTML = html;
+}
+
+function renderWeek(base){
+  buildHead(base);
+  const days = Array.from({length:5},(_,i)=>addDays(base,i));
+  const trs = document.querySelectorAll('#menuTable tbody tr');
+  trs.forEach(tr=> tr.innerHTML = `<th>${tr.querySelector('th')?.textContent||''}</th>`);
+
+  days.forEach(d=>{
+    const ds = fmt(d);
+    const weekNo = Math.ceil(d.getDate()/7);
+    const holiday = isHoliday(d);
+    const specialWed = (d.getDay()===3 && weekNo===2); // 둘째 수요일 점심 휴무
+    const specialFri = (d.getDay()===5 && weekNo===4); // 넷째 금요일 전일 휴무
+
+    ['아침','점심','저녁'].forEach((meal,r)=>{
+      const cell = document.createElement('td');
+
+      if (holiday) { cell.className='holiday'; cell.textContent='식당 휴무'; }
+      else if (specialFri) { cell.className='holiday'; cell.textContent='휴무 (넷째주 금요일)'; }
+      else if (specialWed && meal==='점심') { cell.className='closed'; cell.textContent='점심 미운영'; }
+      else {
+        const items = (MENU[ds] && MENU[ds][meal]) || [];
+        if (!items.length) cell.textContent = '—';
+        else cell.innerHTML = items.map(x=>`<span class="chip">${x}</span>`).join('');
+      }
+      trs[r].appendChild(cell);
+    });
+  });
+
+  document.getElementById('info').textContent =
+    `${base.getFullYear()}년 ${base.getMonth()+1}월 ${base.getDate()}일 ~ ${fmt(addDays(base,4))}`;
+}
+
+// ===== 데이터 로드 & 초기화 =====
+async function init(view='this'){
+  try{
+    const res = await fetch(DATA_URL, {cache:'no-store'});
+    MENU = await res.json();
+  }catch(e){ MENU = {}; }
+
+  const today = new Date();
+  let base = mondayOf(new Date(today));
+
+  if(view==='prev') base = addDays(base, -7);
+  if(view==='next') base = addDays(base,  7);
+
+  renderWeek(base);
+  // 버튼 이벤트
+  document.getElementById('prevWeek').onclick = ()=>init('prev');
+  document.getElementById('nextWeek').onclick = ()=>init('next');
+  document.getElementById('thisWeek').onclick = ()=>init('this');
+}
+init();
+</script>
+</body>
+</html>
